@@ -1,1 +1,7 @@
 fastapi[standard]>=0.115.0
+torch>=2.2
+numpy>=1.26
+pandas>=2.2
+yfinance>=0.2.40
+gymnasium>=1.0
+matplotlib>=3.8
