@@ -7,6 +7,8 @@ from havenrl.data import TICKERS
 WINDOW = 10  # the agent looks at the last 10 days of moves
 START_CASH = 100_000.0
 COST_RATE = 0.001  # 0.1% fee on every rupee bought or sold
+# Extra minus in the REWARD (not the money) for changing basket, so the agent only switches when it is worth it.
+SWITCH_PENALTY = 0.3
 
 # Each basket is a target split of money, in TICKERS order: [Gold, Liquid, Bond].
 BASKETS = np.array([
@@ -38,6 +40,7 @@ class HavenEnv(gym.Env):
         self.day = WINDOW - 1  # first day that has a full 10-day window behind it
         self.cash = START_CASH
         self.units = np.zeros(len(TICKERS))  # how many units of each ETF we own
+        self.basket = None  # no basket yet: the first pick is never a "switch"
         return self._observation(), self._info()
 
     def step(self, action):
@@ -54,6 +57,9 @@ class HavenEnv(gym.Env):
         self.day += 1
         value_after = self._value(self.prices[self.day])
         reward = (value_after / value_before - 1) * 100  # daily % change, after fees
+        if self.basket is not None and action != self.basket:
+            reward -= SWITCH_PENALTY
+        self.basket = action
 
         terminated = self.day == len(self.prices) - 1  # no more days of data
         info = self._info()
@@ -78,3 +84,18 @@ class HavenEnv(gym.Env):
             "value": self._value(self.prices[self.day]),
             "weights": self._weights(),
         }
+
+
+def play(env, choose):
+    """Play one full game with no learning. `choose(obs)` picks the basket each day.
+    Returns the dates, the portfolio value on each date, and the baskets picked."""
+    obs, info = env.reset()
+    dates, values, actions = [str(info["date"].date())], [info["value"]], []
+    done = False
+    while not done:
+        action = choose(obs)
+        obs, _, done, _, info = env.step(action)
+        dates.append(str(info["date"].date()))
+        values.append(info["value"])
+        actions.append(action)
+    return dates, values, actions

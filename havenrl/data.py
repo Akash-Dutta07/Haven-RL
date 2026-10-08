@@ -10,7 +10,10 @@ TICKERS = list(ASSETS)
 
 # Bharat Bond ETF only starts trading on 2019-12-30, so training honestly begins in 2020.
 TRAIN_START = "2020-01-01"
-TRAIN_END = "2022-12-31"
+TRAIN_END = "2021-12-31"
+# 2022 is the "practice exam": never trained on, only used to pick the best saved brain.
+VAL_START = "2022-01-01"
+VAL_END = "2022-12-31"
 TEST_START = "2023-01-01"
 TEST_END = "2024-12-31"
 
@@ -37,11 +40,12 @@ def daily_returns(prices):
     return prices.pct_change().fillna(0.0)
 
 
-def split_train_test(df):
-    """Split any date-indexed table (prices or returns) into the train and test periods."""
+def split_periods(df):
+    """Split any date-indexed table (prices or returns) into the train, validation and test periods."""
     train = df.loc[TRAIN_START:TRAIN_END]
+    val = df.loc[VAL_START:VAL_END]
     test = df.loc[TEST_START:TEST_END]
-    return train, test
+    return train, val, test
 
 
 def fit_scaler(train_returns):
@@ -52,3 +56,14 @@ def fit_scaler(train_returns):
 def scale_returns(returns, usual_move):
     """Divide by the usual move so a normal day is about 1 for every asset (Gold, Liquid, Bond)."""
     return returns / usual_move
+
+
+def prepare_data():
+    """Everything train.py and backtest.py need: {"train"/"val"/"test": (real prices, scaled returns)}."""
+    prices = fetch_prices()
+    returns = daily_returns(prices)  # computed on ALL prices before splitting, so a period's day 1 is not 0
+    train_returns, _, _ = split_periods(returns)
+    scaled = scale_returns(returns, fit_scaler(train_returns))
+
+    periods = ("train", "val", "test")
+    return dict(zip(periods, zip(split_periods(prices), split_periods(scaled))))
