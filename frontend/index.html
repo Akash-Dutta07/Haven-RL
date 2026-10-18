@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HavenRL Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --card: #ffffff;
+    --border: #e4e3df;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --grid: #ecebe7;
+    --agent: #2a78d6;      /* blue */
+    --baseline: #eb6834;   /* orange */
+    --gold: #eda100;       /* basket 0: mostly Gold */
+    --bond: #1baf7a;       /* basket 1: mostly Bond */
+    --liquid: #6250d6;     /* basket 2: mostly Liquid */
+    --good: #008300;
+    --bad: #c4302b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --card: #232322;
+      --border: #3a3936;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --grid: #2f2e2c;
+      --agent: #3987e5;
+      --baseline: #d95926;
+      --gold: #c98500;
+      --bond: #199e70;
+      --liquid: #9085e9;
+      --good: #4cb84c;
+      --bad: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--text-primary);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--text-secondary); margin: 0 0 24px; }
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .error { border-color: var(--bad); color: var(--bad); }
+  .hidden { display: none; }
+
+  /* Number cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card .label { color: var(--text-secondary); font-size: 13px; }
+  .card .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .vs { color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .card .verdict { font-size: 13px; font-weight: 600; margin-top: 4px; }
+  .win { color: var(--good); }
+  .lose { color: var(--bad); }
+
+  .chart-box { position: relative; height: 320px; }
+
+  /* Period buttons */
+  .periods { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .periods .label { color: var(--text-secondary); font-size: 13px; margin-right: 4px; }
+  .periods button {
+    font: inherit; font-size: 14px; cursor: pointer;
+    padding: 6px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text-primary);
+  }
+  .periods button:hover { border-color: var(--text-muted); }
+  .periods button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface); border-color: var(--text-primary); }
+  .period-info { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
+
+  /* Basket strip */
+  .strip { display: flex; gap: 0; height: 36px; border-radius: 4px; overflow: hidden; }
+  .strip div { min-width: 1px; }
+  .strip div + div { box-shadow: inset 1px 0 0 var(--card); }
+  .strip-axis { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; margin-top: 6px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; font-size: 13px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .note { color: var(--text-muted); font-size: 13px; margin: 12px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HavenRL</h1>
+  <p class="sub" id="subtitle">A DQN agent choosing between Gold, Bond and Liquid ETF baskets, compared with an always-Gold-heavy baseline. Starting money: ₹1,00,000.</p>
+
+  <div id="error" class="panel error hidden"></div>
+
+  <div id="dashboard" class="hidden">
+    <div class="periods" id="periods" role="group" aria-label="Choose period">
+      <span class="label">Period:</span>
+      <button data-period="all" aria-pressed="true">All (2023–24)</button>
+      <button data-period="2023" aria-pressed="false">2023</button>
+      <button data-period="2024" aria-pressed="false">2024</button>
+    </div>
+    <p class="period-info" id="periodInfo"></p>
+
+    <div class="cards" id="cards"></div>
+
+    <section class="panel">
+      <h2>Portfolio value each day</h2>
+      <div class="chart-box"><canvas id="valueChart" aria-label="Line chart of agent and baseline portfolio value over the test period"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <h2>Basket the agent held each day</h2>
+      <div class="strip" id="strip"></div>
+      <div class="strip-axis"><span id="stripStart"></span><span id="stripEnd"></span></div>
+      <div class="legend" id="stripLegend"></div>
+      <p class="note" id="stripNote"></p>
+    </section>
+  </div>
+</main>
+
+<script>
+const BASKET_NAMES = ["Mostly Gold", "Mostly Bond", "Mostly Liquid"];
+const BASKET_VARS = ["--gold", "--bond", "--liquid"];
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const rupees = n => "₹" + Math.round(n).toLocaleString("en-IN");
+
+// Ask the waiter (the API) for one menu item.
+async function order(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+  return res.json();
+}
+
+// ---- Report card in JavaScript: the same formulas as havenrl/metrics.py ----
+const totalReturn = v => (v[v.length - 1] / v[0] - 1) * 100;
+
+function maxDrawdown(v) {
+  let peak = v[0], worst = 0;
+  for (const x of v) { peak = Math.max(peak, x); worst = Math.max(worst, (peak - x) / peak); }
+  return worst * 100;
+}
+
+function sharpeRatio(v) {
+  const daily = v.slice(1).map((x, i) => x / v[i] - 1);
+  const mean = daily.reduce((a, b) => a + b, 0) / daily.length;
+  const std = Math.sqrt(daily.reduce((a, b) => a + (b - mean) ** 2, 0) / daily.length);
+  return std === 0 ? 0 : mean / std * Math.sqrt(252);
+}
+
+const countSwitches = actions => actions.filter((a, i) => i > 0 && a !== actions[i - 1]).length;
+
+// ---- Period buttons ----
+let results, chart;
+
+// Which days belong to a period. For a year, also take the last day of the year before
+// as the starting point, so the first day's move of that year is counted.
+function periodRange(period) {
+  const daily = results.daily;
+  if (period === "all") return [0, daily.length - 1];
+  const idx = daily.map((d, i) => d.date.startsWith(period) ? i : -1).filter(i => i >= 0);
+  return [Math.max(0, idx[0] - 1), idx[idx.length - 1]];
+}
+
+function showPeriod(period) {
+  const [s, e] = periodRange(period);
+  const days = results.daily.slice(s, e + 1);
+  const actions = results.agent_actions.slice(s, e);  // actions[i] is held from day i to day i+1
+
+  // Restart both at ₹1,00,000 on the first day, so they are compared fairly.
+  const rebase = key => days.map(d => d[key] / days[0][key] * 100000);
+  const agent = rebase("agent_value"), baseline = rebase("baseline_value");
+  const dates = days.map(d => d.date);
+
+  document.querySelectorAll("#periods button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.period === period));
+  document.getElementById("periodInfo").textContent =
+    `Showing ${dates[1]} → ${dates[dates.length - 1]} (${actions.length} trading days). ` +
+    `Both start with ₹1,00,000 on ${dates[0]}. The agent switched basket ${countSwitches(actions)} times.`;
+
+  showCards(agent, baseline);
+  showValueChart(dates, agent, baseline);
+  showBasketStrip(dates, actions);
+}
+
+function showCards(agent, baseline) {
+  // [label, function, formatter, is higher better?]
+  const rows = [
+    ["Value at end", v => v[v.length - 1], rupees, true],
+    ["Total return", totalReturn, v => v.toFixed(2) + "%", true],
+    ["Max drawdown", maxDrawdown, v => v.toFixed(2) + "%", false],
+    ["Sharpe ratio", sharpeRatio, v => v.toFixed(2), true],
+  ];
+  document.getElementById("cards").innerHTML = rows.map(([label, f, fmt, higherBetter]) => {
+    const a = f(agent), b = f(baseline);
+    const agentWins = higherBetter ? a > b : a < b;
+    return `<div class="card">
+      <div class="label">${label} (agent)</div>
+      <div class="value">${fmt(a)}</div>
+      <div class="vs">Baseline: ${fmt(b)}</div>
+      <div class="verdict ${agentWins ? "win" : "lose"}">${agentWins ? "▲ Agent better" : "▼ Baseline better"}</div>
+    </div>`;
+  }).join("");
+}
+
+function showValueChart(dates, agent, baseline) {
+  if (chart) {  // already drawn once: just swap in the new numbers
+    chart.data.labels = dates;
+    chart.data.datasets[0].data = agent;
+    chart.data.datasets[1].data = baseline;
+    chart.update();
+    return;
+  }
+  const grid = css("--grid"), muted = css("--text-muted"), secondary = css("--text-secondary");
+  chart = new Chart(document.getElementById("valueChart"), {
+    type: "line",
+    data: {
+      labels: dates,
+      datasets: [
+        { label: "Agent (DQN)", data: agent, borderColor: css("--agent"), backgroundColor: css("--agent") },
+        { label: "Baseline (always Mostly Gold)", data: baseline, borderColor: css("--baseline"), backgroundColor: css("--baseline") },
+      ],
+    },
+    options: {
+      maintainAspectRatio: false,
+      animation: false,  // draw instantly
+      interaction: { mode: "index", intersect: false },  // hover anywhere: both values for that day
+      elements: { point: { radius: 0, hoverRadius: 5 }, line: { borderWidth: 2 } },
+      plugins: {
+        legend: { labels: { color: secondary, usePointStyle: true, pointStyle: "line" } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${rupees(c.parsed.y)}` } },
+      },
+      scales: {
+        x: { ticks: { color: muted, maxTicksLimit: 8 }, grid: { display: false } },
+        y: { ticks: { color: muted, callback: v => rupees(v) }, grid: { color: grid } },
+      },
+    },
+  });
+}
+
+function showBasketStrip(dates, actions) {
+  // actions[i] is the basket held from dates[i] to dates[i+1].
+  // Join days in a row with the same basket into one block (fewer pieces to draw).
+  const blocks = [];
+  actions.forEach((a, i) => {
+    const last = blocks[blocks.length - 1];
+    if (last && last.basket === a) { last.days++; last.end = dates[i + 1]; }
+    else blocks.push({ basket: a, days: 1, start: dates[i + 1], end: dates[i + 1] });
+  });
+
+  document.getElementById("strip").innerHTML = blocks.map(b =>
+    `<div style="flex:${b.days};background:var(${BASKET_VARS[b.basket]})"
+          title="${BASKET_NAMES[b.basket]}: ${b.start} → ${b.end} (${b.days} day${b.days > 1 ? "s" : ""})"></div>`
+  ).join("");
+  document.getElementById("stripStart").textContent = dates[1];
+  document.getElementById("stripEnd").textContent = dates[dates.length - 1];
+
+  // Legend doubles as a small table: how many days in each basket.
+  const counts = [0, 1, 2].map(k => actions.filter(a => a === k).length);
+  document.getElementById("stripLegend").innerHTML = counts.map((n, k) =>
+    `<span><i class="swatch" style="background:var(${BASKET_VARS[k]})"></i>${BASKET_NAMES[k]}: ${n} days (${(100 * n / actions.length).toFixed(0)}%)</span>`
+  ).join("");
+  document.getElementById("stripNote").textContent = "Hover a block to see its dates. The baseline holds Mostly Gold every day.";
+}
+
+async function main() {
+  try {
+    const summary = await order("/summary");
+    results = await order("/results");
+    document.getElementById("subtitle").textContent +=
+      ` Test period: ${summary.test_period.start} → ${summary.test_period.end}.`;
+    document.querySelectorAll("#periods button").forEach(b =>
+      b.addEventListener("click", () => showPeriod(b.dataset.period)));
+    showPeriod("all");
+    document.getElementById("dashboard").classList.remove("hidden");
+  } catch (err) {
+    const box = document.getElementById("error");
+    box.textContent = "Could not load data from the API. Is it running? (uv run fastapi dev api/main.py) Details: " + err.message;
+    box.classList.remove("hidden");
+  }
+}
+main();
+</script>
+</body>
+</html>
